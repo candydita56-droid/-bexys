@@ -1,8 +1,6 @@
 // --- CONFIGURATION ---
-// Your specific AI Model
 const URL_MODEL = "https://teachablemachine.withgoogle.com/models/2KNvF2Sda/";
 
-// Your specific Firebase Keys
 const firebaseConfig = {
   apiKey: "AIzaSyDgFj6bpL_rrzdnv5LcoeXd-VTYWyhahDk",
   authDomain: "recon-database-2f0c1.firebaseapp.com",
@@ -13,156 +11,231 @@ const firebaseConfig = {
   measurementId: "G-MLVBC1WPLY"
 };
 
-// --- INITIALIZATION ---
-// Initialize Firebase
-// We use a try-catch block so if the database fails, the map still works.
+// --- INIT ---
 try {
     firebase.initializeApp(firebaseConfig);
-    console.log("Database Connection: ONLINE");
-} catch (e) {
-    console.warn("Database Connection: FAILED (Offline Mode Active)");
-    console.error(e);
-}
+    console.log("Uplink Established.");
+} catch (e) { console.warn("Offline Mode"); }
 const db = firebase.database();
 
-// Initialize Map
-// Default view set to Detroit (Rust Belt) for high abandon density
-const map = L.map('map', {
-    zoomControl: false, // Hides the +/- buttons for a cleaner look
+const map = L.map('map', { 
+    zoomControl: false, 
     attributionControl: false 
 }).setView([42.3314, -83.0458], 18);
 
-// Add Satellite Layer (Esri World Imagery)
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19,
-    crossOrigin: true // CRITICAL: Allows the AI to "see" the map images
+    maxZoom: 19, crossOrigin: true
 }).addTo(map);
 
-// Update coordinates on the green display as you move
 map.on('move', () => {
-    const center = map.getCenter();
-    document.getElementById('lat-disp').innerText = center.lat.toFixed(5);
-    document.getElementById('lng-disp').innerText = center.lng.toFixed(5);
+    const c = map.getCenter();
+    document.getElementById('lat-disp').innerText = c.lat.toFixed(5);
+    document.getElementById('lng-disp').innerText = c.lng.toFixed(5);
 });
 
-// Load the AI Model
+// --- AI LOADER ---
 let model;
 async function loadAI() {
-    const readout = document.getElementById("scan-readout");
-    readout.innerText = "INITIALIZING AI...";
     try {
-        const modelURL = URL_MODEL + "model.json";
-        const metadataURL = URL_MODEL + "metadata.json";
-        model = await tmImage.load(modelURL, metadataURL);
-        readout.innerText = "SYSTEM ONLINE. READY.";
-    } catch (e) {
-        readout.innerText = "AI LOAD FAILED";
-        console.error(e);
-    }
+        model = await tmImage.load(URL_MODEL + "model.json", URL_MODEL + "metadata.json");
+        document.getElementById("scan-readout").innerText = "SYSTEM READY";
+    } catch (e) { console.error(e); }
 }
 loadAI();
 
-// --- THE SCANNER LOGIC ---
-window.initiateScan = async function() {
-    const readout = document.getElementById("scan-readout");
-    const bar = document.getElementById("confidence-meter");
-    const btn = document.getElementById("scan-btn");
+// --- DRAG SELECTION LOGIC ---
+let isTargeting = false;
+let startX, startY;
+const box = document.getElementById('selection-box');
+const mapContainer = document.getElementById('map');
 
-    // Safety check
-    if (!model) {
-        readout.innerText = "WAITING FOR AI...";
-        return;
-    }
-
-    btn.disabled = true;
-    readout.innerText = "CAPTURING OPTICAL FEED...";
+window.toggleMode = function() {
+    isTargeting = !isTargeting;
+    const btn = document.getElementById('mode-btn');
+    const instr = document.getElementById('instruction-text');
     
-    // Reset the confidence bar
-    bar.style.width = "0%";
-    bar.style.backgroundColor = "#0f0";
+    if (isTargeting) {
+        btn.innerText = "DISENGAGE TARGETING";
+        btn.classList.add("active");
+        instr.style.display = "block";
+        map.dragging.disable(); // FREEZE MAP
+        mapContainer.style.cursor = "crosshair";
+    } else {
+        btn.innerText = "ACTIVATE TARGETING";
+        btn.classList.remove("active");
+        instr.style.display = "none";
+        map.dragging.enable(); // UNFREEZE MAP
+        mapContainer.style.cursor = "grab";
+        box.style.display = 'none';
+    }
+};
 
-    // Take a "screenshot" of the map div
+// Events for Mouse & Touch
+mapContainer.addEventListener('mousedown', startDraw);
+mapContainer.addEventListener('touchstart', (e) => startDraw(e.touches[0]), {passive: false});
+
+mapContainer.addEventListener('mousemove', moveDraw);
+mapContainer.addEventListener('touchmove', (e) => moveDraw(e.touches[0]), {passive: false});
+
+mapContainer.addEventListener('mouseup', endDraw);
+mapContainer.addEventListener('touchend', endDraw);
+
+function startDraw(e) {
+    if (!isTargeting) return;
+    const rect = mapContainer.getBoundingClientRect();
+    startX = e.clientX - rect.left;
+    startY = e.clientY - rect.top;
+    
+    box.style.left = startX + 'px';
+    box.style.top = startY + 'px';
+    box.style.width = '0px';
+    box.style.height = '0px';
+    box.style.display = 'block';
+}
+
+function moveDraw(e) {
+    if (!isTargeting || box.style.display === 'none') return;
+    const rect = mapContainer.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const currentY = e.clientY - rect.top;
+    
+    const width = currentX - startX;
+    const height = currentY - startY;
+    
+    box.style.width = Math.abs(width) + 'px';
+    box.style.height = Math.abs(height) + 'px';
+    box.style.left = (width < 0 ? currentX : startX) + 'px';
+    box.style.top = (height < 0 ? currentY : startY) + 'px';
+}
+
+function endDraw() {
+    if (!isTargeting) return;
+    const rect = box.getBoundingClientRect();
+    
+    // Minimum size check (prevent accidental clicks)
+    if (rect.width > 20 && rect.height > 20) {
+        processScan(rect);
+    }
+    
+    // Visual reset
+    setTimeout(() => { box.style.display = 'none'; }, 200);
+}
+
+// --- SCANNING ENGINE ---
+async function processScan(rect) {
+    if (!model) return;
+    
+    const readout = document.getElementById("scan-readout");
+    readout.innerText = "ENHANCING & ANALYZING...";
+    
+    // 1. Full Res Capture
     html2canvas(document.getElementById("map"), {
-        useCORS: true, // Allow cross-origin images
+        useCORS: true,
         allowTaint: true,
-        ignoreElements: (element) => element.id === 'ui-overlay' // Don't scan the UI itself
-    }).then(async canvas => {
+        scale: window.devicePixelRatio || 2 // Force Retina/High-Res
+    }).then(async fullCanvas => {
         
-        readout.innerText = "ANALYZING STRUCTURE...";
+        // 2. Crop to Selection
+        const cropCanvas = document.createElement('canvas');
+        const scale = window.devicePixelRatio || 2;
         
-        // Feed the screenshot to the AI
-        const prediction = await model.predict(canvas);
+        cropCanvas.width = rect.width * scale;
+        cropCanvas.height = rect.height * scale;
+        const ctx = cropCanvas.getContext('2d');
         
-        // Find the probability for "Abandoned"
-        // (This loop finds the class named "Abandoned" regardless of order)
+        ctx.drawImage(
+            fullCanvas, 
+            rect.left * scale, rect.top * scale, rect.width * scale, rect.height * scale,
+            0, 0, rect.width * scale, rect.height * scale
+        );
+
+        // 3. AI Prediction
+        const prediction = await model.predict(cropCanvas);
+        
         let abandonP = 0;
         for (let i = 0; i < prediction.length; i++) {
-            if (prediction[i].className === "Abandoned") {
-                abandonP = prediction[i].probability;
-            }
+            if (prediction[i].className === "Abandoned") abandonP = prediction[i].probability;
         }
 
-        // Update UI
         const percent = (abandonP * 100).toFixed(1);
-        bar.style.width = percent + "%";
+        document.getElementById("confidence-meter").style.width = percent + "%";
         
-        if (abandonP > 0.70) {
-            // HIGH CONFIDENCE
-            readout.innerText = `TARGET CONFIRMED (${percent}%)`;
-            bar.style.backgroundColor = "#f00"; // Red
-            markLocation(abandonP); // Save to database
-        } else if (abandonP > 0.40) {
-            // MEDIUM CONFIDENCE
-            readout.innerText = `UNCERTAIN MATCH (${percent}%)`;
-            bar.style.backgroundColor = "orange";
+        if (abandonP > 0.50) {
+            readout.innerText = `TARGET IDENTIFIED (${percent}%)`;
+            // Save Image & Data to DB
+            saveTarget(abandonP, cropCanvas.toDataURL());
         } else {
-            // LOW CONFIDENCE
             readout.innerText = "SECTOR CLEAR";
-            bar.style.backgroundColor = "#0f0"; // Green
         }
-        
-        btn.disabled = false;
         
     }).catch(err => {
         console.error(err);
-        readout.innerText = "SENSOR ERROR (CORS)";
-        btn.disabled = false;
+        readout.innerText = "SENSOR ERROR";
     });
-};
+}
 
-// --- MARKER SYSTEM ---
-function markLocation(confidence) {
+// --- DATABASE FUNCTIONS ---
+function saveTarget(confidence, imgData) {
+    const locId = Date.now();
     const center = map.getCenter();
     
-    // Create a unique ID for this find
-    const locId = Date.now();
-    
-    // Send to Firebase
-    firebase.database().ref('targets/' + locId).set({
+    firebase.database().ref('intel/' + locId).set({
         lat: center.lat,
         lng: center.lng,
         confidence: confidence,
-        finder: "Agent_" + Math.floor(Math.random() * 999), // Random Agent ID
+        image: imgData, // Storing the base64 image directly
+        status: "UNVERIFIED",
         timestamp: Date.now()
     });
 }
 
-// --- TEAM SYNC (LISTEN FOR UPDATES) ---
-// This runs whenever ANYONE on the team finds something
-firebase.database().ref('targets/').on('value', (snapshot) => {
-    const data = snapshot.val();
-    if (data) {
-        Object.keys(data).forEach(key => {
-            const t = data[key];
-            
-            // Add a red marker to the map
-            L.circleMarker([t.lat, t.lng], {
-                color: '#f00',
-                fillColor: '#f00',
-                fillOpacity: 0.5,
-                radius: 20
-            }).addTo(map)
-            .bindPopup(`<b>TARGET DETECTED</b><br>Confidence: ${(t.confidence*100).toFixed(0)}%<br>Time: ${new Date(t.timestamp).toLocaleTimeString()}`);
+window.toggleDatabase = function() {
+    const el = document.getElementById('database-overlay');
+    const grid = document.getElementById('db-grid');
+    
+    if (el.style.display === 'none') {
+        el.style.display = 'flex';
+        // Load data
+        grid.innerHTML = '<div style="color:#0f0;">DECRYPTING ARCHIVES...</div>';
+        
+        firebase.database().ref('intel/').once('value', (snapshot) => {
+            grid.innerHTML = '';
+            const data = snapshot.val();
+            if (data) {
+                // Show newest first
+                Object.keys(data).reverse().forEach(key => {
+                    const item = data[key];
+                    const div = document.createElement('div');
+                    div.className = 'db-item';
+                    
+                    const statusColor = item.status === "CONFIRMED" ? "#0f0" : (item.status === "FALSE_ALARM" ? "#f00" : "#aaa");
+                    
+                    div.innerHTML = `
+                        <img src="${item.image}" />
+                        <div class="db-info">
+                            CONF: ${(item.confidence*100).toFixed(0)}%<br>
+                            STATUS: <span style="color:${statusColor}">${item.status}</span>
+                        </div>
+                        <button class="verify-btn btn-yes" onclick="verify('${key}', 'CONFIRMED')">CONFIRM ABANDONED</button>
+                        <button class="verify-btn btn-no" onclick="verify('${key}', 'FALSE_ALARM')">FALSE POSITIVE</button>
+                    `;
+                    grid.appendChild(div);
+                });
+            } else {
+                grid.innerHTML = '<div style="color:#555;">NO INTEL COLLECTED YET</div>';
+            }
         });
+        
+    } else {
+        el.style.display = 'none';
     }
-});
+};
+
+window.verify = function(key, newStatus) {
+    firebase.database().ref('intel/' + key).update({
+        status: newStatus
+    });
+    // Refresh the view
+    toggleDatabase(); 
+    toggleDatabase(); 
+};
