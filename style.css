@@ -1,105 +1,83 @@
-/* RESET & BASIC SETUP */
-body {
-    margin: 0;
-    padding: 0;
-    background-color: #000; /* Default to black */
-    font-family: 'Courier New', Courier, monospace; /* Hacker font */
-    overflow: hidden; /* Stop the page from scrolling */
-}
+/* GLOBAL RESET */
+body { margin: 0; padding: 0; background: #000; font-family: 'Courier New', monospace; overflow: hidden; }
 
-/* MAP FULLSCREEN */
-#map {
-    height: 100vh; /* 100% Viewport Height */
-    width: 100vw;  /* 100% Viewport Width */
-    z-index: 1;
-}
+/* MAP CONTAINER */
+#map { height: 100vh; width: 100vw; z-index: 1; }
 
-/* THE FLOATING UI CONTAINER */
+/* HUD PANEL */
 #ui-overlay {
     position: absolute;
-    top: 20px;
-    left: 20px;
-    width: 320px; /* Width of the control panel */
-    z-index: 1000; /* Sits ON TOP of the map */
-    pointer-events: none; /* Allows clicks to pass through the empty space around the box */
+    top: 10px; left: 10px;
+    width: 300px;
+    z-index: 1000;
+    pointer-events: none; /* Clicks pass through */
 }
 
-/* THE GREEN BOX ITSELF */
 .status-panel {
-    background: rgba(0, 10, 0, 0.9); /* See-through black */
-    border: 1px solid #0f0; /* Matrix Green border */
-    color: #0f0; /* Matrix Green text */
-    padding: 20px;
-    pointer-events: auto; /* Makes the box clickable */
-    box-shadow: 0 0 15px rgba(0, 255, 0, 0.2); /* Glowing effect */
-}
-
-/* HEADERS */
-h2 {
-    font-size: 16px;
-    border-bottom: 1px solid #0f0;
-    margin: 0 0 15px 0;
-    padding-bottom: 5px;
-    letter-spacing: 2px;
-    text-align: center;
-}
-
-/* COORDINATES DISPLAY */
-#data-stream {
-    font-size: 12px;
-    margin-bottom: 15px;
-    color: #6f6; /* Slightly dimmer green */
-    line-height: 1.4;
-}
-
-/* SCAN STATUS TEXT */
-#scan-readout {
-    font-weight: bold;
-    font-size: 14px;
-    text-transform: uppercase;
-    min-height: 20px;
-    margin-bottom: 5px;
-    text-shadow: 0 0 5px #0f0; /* Text glow */
-}
-
-/* THE CONFIDENCE BAR */
-#confidence-meter {
-    height: 8px;
-    background: #0f0;
-    width: 0%;
-    margin-bottom: 20px;
-    transition: width 0.5s ease-out, background-color 0.3s; /* Smooth animation */
-    box-shadow: 0 0 5px rgba(0,255,0,0.5);
-}
-
-/* THE BUTTON */
-button {
-    background: #000;
-    color: #0f0;
+    background: rgba(0, 10, 0, 0.95);
     border: 1px solid #0f0;
+    color: #0f0;
     padding: 15px;
-    width: 100%;
-    font-family: 'Courier New', monospace;
-    font-weight: bold;
-    font-size: 14px;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    transition: all 0.2s;
+    pointer-events: auto; /* Clicks work here */
+    box-shadow: 0 0 15px rgba(0, 255, 0, 0.2);
 }
 
-/* BUTTON HOVER EFFECT */
-button:hover {
-    background: #0f0;
-    color: #000;
-    box-shadow: 0 0 20px #0f0; /* Intense glow on hover */
+h2 { font-size: 14px; border-bottom: 1px solid #0f0; margin: 0 0 10px 0; text-align: center; letter-spacing: 2px; }
+#data-stream { font-size: 11px; margin-bottom: 10px; color: #6f6; }
+#scan-readout { font-weight: bold; font-size: 12px; margin-bottom: 5px; text-transform: uppercase; text-shadow: 0 0 5px #0f0; }
+
+/* CONFIDENCE BAR */
+#confidence-meter { height: 6px; background: #0f0; width: 0%; margin-bottom: 15px; transition: width 0.3s; }
+
+/* BUTTONS */
+button {
+    background: #000; color: #0f0; border: 1px solid #0f0;
+    padding: 12px; width: 100%; margin-bottom: 8px;
+    font-family: 'Courier New', monospace; font-weight: bold;
+    cursor: pointer; text-transform: uppercase;
+}
+button:hover { background: #0f0; color: #000; }
+button.active { background: #f00; color: #000; border-color: #f00; animation: pulse 1s infinite; }
+
+/* INSTRUCTIONS */
+#instruction-text { color: #f00; font-size: 11px; margin-top: 5px; text-align: center; font-weight: bold; animation: blink 1s infinite; }
+
+/* DRAG BOX */
+#selection-box {
+    position: absolute;
+    border: 2px dashed #f00;
+    background: rgba(255, 0, 0, 0.15);
+    display: none;
+    z-index: 2000;
+    pointer-events: none;
 }
 
-/* BUTTON DISABLED STATE (When scanning) */
-button:disabled {
-    border-color: #555;
-    color: #555;
-    cursor: not-allowed;
-    box-shadow: none;
-    background: #111;
+/* DATABASE OVERLAY */
+#database-overlay {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 3000;
+    display: flex; flex-direction: column;
 }
+.db-header { padding: 20px; border-bottom: 1px solid #0f0; display: flex; justify-content: space-between; align-items: center; background: #000; }
+.db-header h2 { color: #0f0; margin: 0; border: none; }
+.close-btn { width: auto; padding: 5px 15px; margin: 0; }
+
+#db-grid {
+    flex: 1; overflow-y: auto; padding: 20px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
+}
+
+/* DATABASE ITEM CARD */
+.db-item { border: 1px solid #333; background: #111; padding: 10px; }
+.db-item img { width: 100%; height: auto; border: 1px solid #555; margin-bottom: 10px; }
+.db-info { font-size: 10px; color: #aaa; margin-bottom: 10px; }
+.verify-btn { padding: 5px; font-size: 10px; margin-bottom: 2px; }
+.btn-yes { border-color: #0f0; color: #0f0; }
+.btn-no { border-color: #f00; color: #f00; }
+.btn-yes:hover { background: #0f0; color: #000; }
+.btn-no:hover { background: #f00; color: #000; }
+
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes pulse { 50% { box-shadow: 0 0 15px #f00; } }
